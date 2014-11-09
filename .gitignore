@@ -1,0 +1,8 @@
+# Python cruft
+*.pyc
+
+# Application state
+config.json
+database.db
+database.db-journal
+ve

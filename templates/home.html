@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+
+{% block body %}
+  <div class="page-header">
+    <h3>About</h3>
+  </div>
+  <p>This application creates events on your Google Calendar to remind you to fuel one or more POSes. By default, events are created at a time at least 24 hours prior to the first ping.</p>
+  {% if person %}
+    <p>You are connected to Google Calendar as {{ person['displayName'] }}. <a href="{{ reverse_url('oauth_start') }}">Not you?</a></p>
+  {% else %}
+    <p>Not connected to Google Calendar. <a href="{{ reverse_url('oauth_start') }}">Click here to connect.</a></p>
+  {% end if %}
+  <div class="page-header">
+    <h3>POS Preferences</h3>
+  </div>
+  <p>POSes selected below will have calendar events created:</p>
+  <p>
+    <form action="/config/set_poses" method="POST" class="form-inline">
+      <table class="table" style="max-width: 60%">
+        <thead>
+          <tr><th>Location</th><th>Name</th><th>Interested?</th></tr>
+        </thead>
+        <tbody>
+          {% for tower in sorted(towers.itervalues(), key=lambda t: t['location']['orbit_name']) %}
+          <tr>
+            <td>{{ tower['location']['orbit_name'] }}</td>
+            <td>{{ tower['name'] }}</td>
+            <td>
+              <div class="checkbox">
+                <label>
+                  <input type="checkbox" name="{{ tower['location']['orbit_id'] }}" {% if tower['location']['orbit_id'] in enabled %}checked{% end if %}>
+                </label>
+              </div>
+            </td>
+          </tr>
+          {% end for %}
+        </tbody>
+      </table>
+      <button type="submit" class="btn btn-default">Save</button>
+    </form>
+  </p>
+  </table>
+{% end block %}
