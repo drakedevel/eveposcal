@@ -47,6 +47,7 @@ class HomeHandler(RequestHandler):
         towers = yield PosmonClient(self.application).get_towers()
 
         self.render('home.html',
+                    char_name=self.cookie['char_name'],
                     enabled=enabled,
                     person=person,
                     towers=towers)

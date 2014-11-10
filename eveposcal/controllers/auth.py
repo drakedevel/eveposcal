@@ -39,6 +39,7 @@ class BraveAuthCallbackHandler(RequestHandler):
             info = yield api.core.info(token)
             self.cookie['brave_token'] = token
             self.cookie['char_id'] = info['character']['id']
+            self.cookie['char_name'] = info['character']['name']
             self.commit_cookie()
             # FIXME: Open redirect
             if self.get_argument('next', False):
