@@ -1,5 +1,6 @@
 import json
 import logging
+import os
 import sys
 from binascii import unhexlify
 from ecdsa.keys import SigningKey, VerifyingKey
@@ -29,13 +30,13 @@ def main():
         unhexlify(config['brave_auth']['private']), curve=NIST256p, hashfunc=sha256)
 
     # Configure web routes
-    app = web.Application(ROUTES, debug=True)
+    app = web.Application(ROUTES, debug=config['debug'])
     app.settings.update(config)
-    app.settings['template_path'] = 'templates'
-    app.listen(8000, address='127.0.0.1')
+    app.settings['template_path'] = os.path.join(os.path.dirname(__file__), '..', 'templates')
+    app.listen(8000, address='127.0.0.1', xheaders=True)
 
     # Configure database engine
-    engine = create_engine(app.settings['database'])
+    engine = create_engine(app.settings['database'], pool_recycle=3600)
     Session.configure(bind=engine)
     Base.metadata.create_all(engine)
     Tower.configure(app.settings['posmon_url'])

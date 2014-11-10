@@ -81,6 +81,7 @@ class OAuthCallbackHandler(RequestHandler, GoogleOAuth2Mixin):
             token = GoogleOauthToken.from_dict(user)
             Token.set_google_oauth(self.session, self.cookie['char_id'], token)
 
+        self.application.cal_service._run_for_char(self.current_user)
         # FIXME: Open redirect
         if self.get_argument('state', False):
             self.redirect(self.get_argument('state'))

@@ -15,7 +15,7 @@ class ConfigSetPosHandler(RequestHandler):
         for arg, value in self.request.body_arguments.iteritems():
             if arg.isdigit():
                 self.session.add(EnabledTowers(char_id=self.current_user, orbit_id=int(arg)))
-        self.application.cal_service._run_for_char(self.session, self.current_user)
+        self.application.cal_service._run_for_char(self.current_user)
         self.redirect(self.reverse_url('home'))
 
 

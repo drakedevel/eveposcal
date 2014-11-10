@@ -1,4 +1,5 @@
 import logging
+import toro
 from datetime import datetime, timedelta
 from tornado import gen
 from tornado.httpclient import HTTPError
@@ -16,6 +17,7 @@ class CalendarService(PeriodicCallback):
     def __init__(self, app):
         super(CalendarService, self).__init__(self._run, self.PERIOD_MS)
         self.app = app
+        self._locks = {}
 
     @gen.coroutine
     def _make_calendar(self, session, char_id, cal_api):
@@ -26,7 +28,23 @@ class CalendarService(PeriodicCallback):
         raise gen.Return(cal_id)
 
     @gen.coroutine
-    def _run_for_char(self, session, char_id):
+    def _run_for_char(self, char_id):
+        if char_id not in self._locks:
+            self._locks[char_id] = toro.Lock()
+        with (yield self._locks[char_id].acquire()):
+            session = Session()
+            commit = True
+            try:
+                yield self._run_for_char_inner(session, char_id)
+            except Exception:
+                session.rollback()
+                commit = False
+            finally:
+                if commit:
+                    session.commit()
+
+    @gen.coroutine
+    def _run_for_char_inner(self, session, char_id):
         token = Token.get_google_oauth(self.app, session, char_id)
         if token is None:
             raise Exception("No Google Calendar API token")
@@ -132,7 +150,7 @@ class CalendarService(PeriodicCallback):
             char_ids = list(set(e.char_id for e in enabled_towers))
 
             logger.info("Starting update run")
-            results = [self._run_for_char(session, char_id) for char_id in char_ids]
+            results = [self._run_for_char(char_id) for char_id in char_ids]
             for char_id, res in zip(char_ids, results):
                 try:
                     yield res
@@ -146,4 +164,3 @@ class CalendarService(PeriodicCallback):
         finally:
             if commit:
                 session.commit()
-
