@@ -16,6 +16,7 @@
   <p>POSes selected below will have calendar events created:</p>
   <p>
     <form action="/config/set_poses" method="POST" class="form-inline">
+      {% module xsrf_form_html() %}
       <table class="table" style="max-width: 60%">
         <thead>
           <tr><th>Location</th><th>Name</th><th>Interested?</th></tr>

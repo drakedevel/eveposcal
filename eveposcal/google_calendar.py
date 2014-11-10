@@ -49,6 +49,10 @@ class GoogleCalendarAPI(object):
         raise gen.Return((yield self._post('calendars/%s/events' % cal_id, body)))
 
     @gen.coroutine
+    def delete_calendar(self, cal_id):
+        raise gen.Return((yield self._delete('calendars/%s' % cal_id)))
+
+    @gen.coroutine
     def delete_event(self, cal_id, event_id):
         raise gen.Return((yield self._delete('calendars/%s/events/%s' % (cal_id, event_id))))
 

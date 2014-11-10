@@ -50,8 +50,8 @@ class BraveAuthCallbackHandler(RequestHandler):
 
 
 class LogoutHandler(RequestHandler):
-    # FIXME: CSRF
     def get(self):
+        self.check_referer()
         self.clear_cookie()
         self.redirect(self.reverse_url('home'))
 

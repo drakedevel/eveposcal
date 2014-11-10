@@ -29,9 +29,10 @@
               <ul class="dropdown-menu">
                 <!-- 
                   <li><a href="#">Preferences</a></li>
-                  <li class="divider"></li>
                 -->
                 <li><a href="{{ reverse_url('logout') }}">Sign Out / Switch</a></li>
+                <li class="divider"></li>
+                <li><a href="{{ reverse_url('reset') }}">Reset GCal state</a></li>
               </ul>
             </li>
         </ul>

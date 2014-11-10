@@ -7,6 +7,14 @@ from ..model.db import Session
 class RequestHandler(web.RequestHandler):
     COOKIE_JAR = 'jar'
 
+    def check_referer(self):
+        referer = self.request.headers.get('Referer', None)
+        if referer is None:
+            raise web.HTTPError(403)
+        prefix = '%s://%s/' % (self.request.protocol, self.request.host)
+        if not referer.startswith(prefix):
+            raise web.HTTPError(403)
+
     def clear_cookie(self):
         super(RequestHandler, self).clear_cookie(self.COOKIE_JAR)
 

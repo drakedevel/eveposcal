@@ -33,6 +33,7 @@ def main():
     app = web.Application(ROUTES, debug=config['debug'])
     app.settings.update(config)
     app.settings['template_path'] = os.path.join(os.path.dirname(__file__), '..', 'templates')
+    app.settings['xsrf_cookies'] = True
     app.listen(8000, address='127.0.0.1', xheaders=True)
 
     # Configure database engine

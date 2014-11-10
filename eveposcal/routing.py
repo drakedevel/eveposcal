@@ -11,6 +11,7 @@ from .controllers.auth import (
 from .controllers.setup import (
     ConfigSetPosHandler,
     HomeHandler,
+    ResetHandler,
     )
 
 ROUTES = [
@@ -21,5 +22,6 @@ ROUTES = [
     url(r'/logout', LogoutHandler, name='logout'),
     url(r'/oauth/start', OAuthStartHandler, name='oauth_start'),
     url(r'/oauth/callback', OAuthCallbackHandler, name='oauth_callback'),
+    url(r'/reset', ResetHandler, name='reset'),
     url(r'/admin/force', ForceHandler, name='force'),
 ]

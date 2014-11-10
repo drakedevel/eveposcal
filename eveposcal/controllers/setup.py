@@ -1,10 +1,14 @@
+import logging
 from tornado import gen, web
 from tornado.httpclient import HTTPError
 
 from .base import RequestHandler
-from ..google_calendar import GooglePlusAPI
-from ..model.db import EnabledTowers, Token
+from ..google_calendar import GoogleCalendarAPI, GooglePlusAPI
+from ..model.db import EnabledTowers, Settings, Token
 from ..posmon_model import PosmonClient
+
+
+logger = logging.getLogger(__name__)
 
 
 class ConfigSetPosHandler(RequestHandler):
@@ -46,3 +50,29 @@ class HomeHandler(RequestHandler):
                     enabled=enabled,
                     person=person,
                     towers=towers)
+
+
+class ResetHandler(RequestHandler):
+    @gen.coroutine
+    @web.authenticated
+    def get(self):
+        self.check_referer()
+
+        # Get the user's Google API token
+        token = Token.get_google_oauth(self.application, self.session, self.current_user)
+        if token is None:
+            self.finish("This only works after you've linked your Google Calendar API token")
+        cal_api = GoogleCalendarAPI(token)
+
+        # Delete calendar linked to account
+        cal_id = Settings.get(self.session, self.current_user, Settings.CALENDAR)
+        if cal_id:
+            try:
+                yield cal_api.delete_calendar(cal_id)
+            except HTTPError:
+                logger.debug("Failed to delete calendar", exc_info=True)
+
+        # Run synchronous update pass
+        yield self.application.cal_service._run_for_char(self.current_user)
+
+        self.redirect(self.reverse_url('home'))
