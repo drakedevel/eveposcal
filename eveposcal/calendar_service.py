@@ -15,7 +15,7 @@ class CalendarService(PeriodicCallback):
     PERIOD_MS = 60 * 60 * 1000
 
     def __init__(self, app):
-        super(CalendarService, self).__init__(self._run, self.PERIOD_MS)
+        super(CalendarService, self).__init__(self._do_update, self.PERIOD_MS)
         self.app = app
         self._locks = {}
 
@@ -141,7 +141,7 @@ class CalendarService(PeriodicCallback):
             session.query(CalendarEvent).filter_by(char_id=char_id, orbit_id=orbit_id).delete()
 
     @gen.coroutine
-    def _run(self):
+    def _do_update(self):
         session = Session()
         commit = True
         try:
