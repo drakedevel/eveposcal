@@ -32,7 +32,18 @@ class GoogleOauthToken(object):
         return result
 
     @gen.coroutine
-    def _renew(self):
+    def add_auth(self, req):
+        token = yield self.get_access_token()
+        req.headers['Authorization'] = 'Bearer %s' % token
+
+    @gen.coroutine
+    def get_access_token(self):
+        if datetime.now() > self.expires:
+            yield self.renew()
+        raise gen.Return(self._access_token)
+
+    @gen.coroutine
+    def renew(self):
         if not self.refresh_token:
             raise Exception("Token expired and can't be renewed!")
         req = HTTPRequest('https://accounts.google.com/o/oauth2/token', method='POST')
@@ -46,17 +57,6 @@ class GoogleOauthToken(object):
         self.expires = new_token.expires
         if self._orm:
             self._orm.value = json.dumps(self.to_dict())
-
-    @gen.coroutine
-    def add_auth(self, req):
-        token = yield self.get_access_token()
-        req.headers['Authorization'] = 'Bearer %s' % token
-
-    @gen.coroutine
-    def get_access_token(self):
-        if datetime.now() > self.expires:
-            yield self._renew()
-        raise gen.Return(self._access_token)
 
     def to_dict(self):
         return {'access_token': self._access_token,

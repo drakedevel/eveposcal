@@ -6,7 +6,7 @@ from brave.api.tornadoclient import API
 
 from .base import RequestHandler
 from ..google_oauth import GoogleOauthToken
-from ..model.db import Token
+from ..model.db import Settings, Token
 
 class BraveAuthStartHandler(RequestHandler):
     @gen.coroutine
@@ -82,7 +82,10 @@ class OAuthCallbackHandler(RequestHandler, GoogleOAuth2Mixin):
             token = GoogleOauthToken.from_dict(user)
             Token.set_google_oauth(self.session, self.cookie['char_id'], token)
 
-        self.application.cal_service._run_for_char(self.current_user)
+            if not Settings.get(self.session, self.current_user, Settings.CALENDAR):
+                yield self.application.cal_service.make_calendar(self.current_user, token)
+            self.application.cal_service.run_for_char(self.current_user)
+
         # FIXME: Open redirect
         if self.get_argument('state', False):
             self.redirect(self.get_argument('state'))

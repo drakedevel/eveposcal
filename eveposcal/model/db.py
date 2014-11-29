@@ -1,4 +1,5 @@
 import json
+from contextlib import contextmanager
 from sqlalchemy import Column, Integer, String, VARBINARY
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
@@ -17,6 +18,10 @@ class CalendarEvent(Base):
     event_id = Column(String(256))
 
     @classmethod
+    def delete(cls, session, char_id, orbit_id):
+        session.query(cls).filter_by(char_id=char_id, orbit_id=orbit_id).delete()
+
+    @classmethod
     def get_for_char(cls, session, char_id):
         return session.query(cls).filter_by(char_id=char_id).all()
 
@@ -26,6 +31,9 @@ class EnabledTowers(Base):
     char_id = Column(Integer, primary_key=True)
     orbit_id = Column(Integer, primary_key=True)
 
+    @classmethod
+    def get_for_char(cls, session, char_id):
+        return session.query(cls).filter_by(char_id=char_id).all()
 
 class Settings(Base):
     __tablename__ = 'settings'
@@ -78,3 +86,14 @@ class Token(Base):
     def set_google_oauth(cls, session, char_id, token):
         obj = Token(char_id=char_id, kind=Token.GOOGLE_OAUTH, value=json.dumps(token.to_dict()))
         session.merge(obj)
+
+
+@contextmanager
+def session_ctx():
+    session = Session()
+    try:
+        yield session
+    except Exception:
+        session.rollback()
+    else:
+        session.commit()

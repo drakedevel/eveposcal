@@ -1,38 +1,50 @@
 import json
+import logging
 from tornado import gen
-from tornado.httpclient import AsyncHTTPClient, HTTPRequest
+from tornado.httpclient import AsyncHTTPClient, HTTPError, HTTPRequest
+
+logger = logging.getLogger(__name__)
 
 class GoogleCalendarAPI(object):
     BASE = 'https://www.googleapis.com/calendar/v3/'
+    TRIES = 2
 
     def __init__(self, token):
         self._token = token
 
+    @gen.coroutine
+    def _do_request(self, method, ep, body=None, as_json=False):
+        url = '%s%s' % (self.BASE, ep)
+        for try_i in range(self.TRIES):
+            try:
+                req = HTTPRequest(url, method=method)
+                yield self._token.add_auth(req)
+                if body is not None:
+                    req.headers['Content-Type'] = 'application/json'
+                    req.body = json.dumps(body)
+                resp = yield AsyncHTTPClient().fetch(req)
+                logger.debug('%s %s (attempt %d) => %d', method, ep, try_i, resp.code)
+                if as_json:
+                    raise gen.Return(json.loads(resp.body))
+                raise gen.Return(resp.body)
+            except HTTPError as e:
+                logger.debug('%s %s => %d', method, ep, e.code)
+                if try_i < (self.TRIES - 1) and e.code == 401:
+                    yield self._token.renew()
+                else:
+                    raise
+
     def _delete(self, ep, as_json=False):
-        return self._get(ep, as_json=as_json, method='DELETE')
+        return self._do_request('DELETE', ep, as_json=as_json)
 
-    @gen.coroutine
-    def _get(self, ep, as_json=True, method='GET'):
-        req = HTTPRequest('%s%s' % (self.BASE, ep), method=method)
-        yield self._token.add_auth(req)
-        resp = yield AsyncHTTPClient().fetch(req)
-        if as_json:
-            raise gen.Return(json.loads(resp.body))
-        raise gen.Return(resp.body)
+    def _get(self, ep, as_json=True):
+        return self._do_request('GET', ep, as_json=as_json)
 
-    @gen.coroutine
-    def _post(self, ep, body, as_json=True, method='POST'):
-        req = HTTPRequest('%s%s' % (self.BASE, ep), method=method)
-        yield self._token.add_auth(req)
-        req.headers['Content-Type'] = 'application/json'
-        req.body = json.dumps(body)
-        resp = yield AsyncHTTPClient().fetch(req)
-        if as_json:
-            raise gen.Return(json.loads(resp.body))
-        raise gen.Return(resp.body)
+    def _post(self, ep, body, as_json=True):
+        return self._do_request('POST', ep, body=body, as_json=as_json)
 
     def _put(self, ep, body, as_json=True):
-        return self._post(ep, body, as_json=as_json, method='PUT')
+        return self._do_request('PUT', ep, body=body, as_json=as_json)
 
     @gen.coroutine
     def add_calendar(self, summary):
@@ -65,11 +77,12 @@ class GoogleCalendarAPI(object):
         raise gen.Return((yield self._get('calendars/%s/events/%s' % (cal_id, event_id))))
 
     @gen.coroutine
-    def update_event(self, cal_id, event_id, summary, start, end, extra):
+    def update_event(self, cal_id, event_id, sequence, summary, start, end, extra):
         body = {'kind': 'calendar#event',
                 'summary': summary,
                 'start': {'dateTime': start.isoformat(), 'timeZone': 'UTC'},
-                'end': {'dateTime': end.isoformat(), 'timeZone': 'UTC'}}
+                'end': {'dateTime': end.isoformat(), 'timeZone': 'UTC'},
+                'sequence': sequence}
         body.update(extra)
         raise gen.Return((yield self._put('calendars/%s/events/%s' % (cal_id, event_id), body)))
 

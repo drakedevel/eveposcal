@@ -19,7 +19,7 @@ class ConfigSetPosHandler(RequestHandler):
         for arg, value in self.request.body_arguments.iteritems():
             if arg.isdigit():
                 self.session.add(EnabledTowers(char_id=self.current_user, orbit_id=int(arg)))
-        self.application.cal_service._run_for_char(self.current_user)
+        self.application.cal_service.run_for_char(self.current_user)
         self.redirect(self.reverse_url('home'))
 
 
@@ -73,7 +73,19 @@ class ResetHandler(RequestHandler):
             except HTTPError:
                 logger.debug("Failed to delete calendar", exc_info=True)
 
+        # Create a new calendar
+        yield _make_calendar(self.session, self.current_user, cal_api)
+
         # Run synchronous update pass
-        yield self.application.cal_service._run_for_char(self.current_user)
+        yield self.application.cal_service.run_for_char(self.current_user)
 
         self.redirect(self.reverse_url('home'))
+
+
+@gen.coroutine
+def _make_calendar(session, char_id, cal_api):
+    response = yield cal_api.add_calendar('EVE POS events')
+    cal_id = response['id']
+    Settings.set(session, char_id, Settings.CALENDAR, cal_id)
+    session.commit()
+    raise gen.Return(cal_id)
