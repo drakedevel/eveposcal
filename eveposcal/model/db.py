@@ -63,7 +63,7 @@ class Token(db.Model):
 
     char_id = db.Column(db.Integer, primary_key=True)
     kind = db.Column(db.String(10), primary_key=True)
-    value = db.Column(db.VARBINARY(256))
+    value = db.Column(db.VARBINARY(4096))
 
     class _Storage(Storage):
         def __init__(self, t):
