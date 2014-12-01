@@ -6,39 +6,39 @@
   </div>
   <p>This application creates events on your Google Calendar to remind you to fuel one or more POSes. By default, events are created at a time at least 24 hours prior to the first ping.</p>
   {% if person %}
-    <p>You are connected to Google Calendar as {{ person['displayName'] }}. <a href="{{ reverse_url('oauth_start') }}">Not you?</a></p>
+    <p>You are connected to Google Calendar as {{ person['displayName'] }}. <a href="{{ url_for('oauth_start') }}">Not you?</a></p>
   {% else %}
-    <p>Not connected to Google Calendar. <a href="{{ reverse_url('oauth_start') }}">Click here to connect.</a></p>
-  {% end if %}
+    <p>Not connected to Google Calendar. <a href="{{ url_for('oauth_start') }}">Click here to connect.</a></p>
+  {% endif %}
   <div class="page-header">
     <h3>POS Preferences</h3>
   </div>
   <p>POSes selected below will have calendar events created:</p>
   <p>
-    <form action="/config/set_poses" method="POST" class="form-inline">
-      {% module xsrf_form_html() %}
+    <form action="{{ url_for('config_set_poses') }}" method="POST" class="form-inline">
+      {# module xsrf_form_html() #}
       <table class="table" style="max-width: 60%">
         <thead>
           <tr><th>Location</th><th>Name</th><th>Interested?</th></tr>
         </thead>
         <tbody>
-          {% for tower in sorted(towers.itervalues(), key=lambda t: t['location']['orbit_name']) %}
+          {% for tower in towers %}
           <tr>
-            <td>{{ tower['location']['orbit_name'] }}</td>
-            <td>{{ tower['name'] }}</td>
+            <td>{{ tower.orbit_name }}</td>
+            <td>{{ tower.name }}</td>
             <td>
               <div class="checkbox">
                 <label>
-                  <input type="checkbox" name="{{ tower['location']['orbit_id'] }}" {% if tower['location']['orbit_id'] in enabled %}checked{% end if %}>
+                  <input type="checkbox" name="{{ tower.orbit_id }}" {% if tower.orbit_id in enabled %}checked{% endif %}>
                 </label>
               </div>
             </td>
           </tr>
-          {% end for %}
+          {% endfor %}
         </tbody>
       </table>
       <button type="submit" class="btn btn-default">Save</button>
     </form>
   </p>
   </table>
-{% end block %}
+{% endblock %}

@@ -1,9 +1,9 @@
-from tornado import gen
+from .base import auth_required
+from ..app import app
 
-from .base import RequestHandler
 
-class ForceHandler(RequestHandler):
-    @gen.coroutine
-    def get(self):
-        yield self.application.cal_service.run_for_all()
-        self.finish('OK')
+@app.route('/admin/force')
+@auth_required
+def get(self):
+    app.cal_service.run_for_all()
+    return 'OK'

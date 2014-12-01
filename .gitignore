@@ -2,7 +2,7 @@
 *.pyc
 
 # Application state
-config.json
+config.cfg
 database.db
 database.db-journal
 ve

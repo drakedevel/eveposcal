@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
   <head>
-    <title>{% block title %}POS Calendar Connector{% end block %}</title>
+    <title>{% block title %}POS Calendar Connector{% endblock %}</title>
     <link rel="stylesheet" href="//maxcdn.bootstrapcdn.com/bootstrap/3.3.0/css/bootstrap.min.css">
     <link rel="stylesheet" href="//maxcdn.bootstrapcdn.com/bootstrap/3.3.0/css/bootstrap-theme.min.css">
     <link rel="stylesheet" href="//maxcdn.bootstrapcdn.com/font-awesome/4.0.3/css/font-awesome.css">
@@ -20,7 +20,7 @@
         </div>
         <div id="navbar" class="navbar-collapse collapse">
           <ul class="nav navbar-nav">
-            <li class="active"><a href="#">Home</a></li>
+            <li class="active"><a href="{{ url_for('home') }}">Home</a></li>
             <li><a href="http://eve.mmcmullen.com/posmon/">POS Monitor</a></li>
           </ul>
           <ul class="nav navbar-nav navbar-right alice">
@@ -30,9 +30,9 @@
                 <!-- 
                   <li><a href="#">Preferences</a></li>
                 -->
-                <li><a href="{{ reverse_url('logout') }}">Sign Out / Switch</a></li>
+                <li><a href="{{ url_for('logout') }}">Sign Out / Switch</a></li>
                 <li class="divider"></li>
-                <li><a href="{{ reverse_url('reset') }}">Reset GCal state</a></li>
+                <li><a href="{{ url_for('reset') }}">Reset GCal state</a></li>
               </ul>
             </li>
         </ul>
@@ -40,7 +40,7 @@
       </div>
     </nav>
     <div class="container" role="main">
-      {% block body %}{% end block %}
+      {% block body %}{% endblock %}
     </div>
     <script src="//ajax.googleapis.com/ajax/libs/jquery/1.11.1/jquery.min.js"></script>
     <script src="//maxcdn.bootstrapcdn.com/bootstrap/3.3.0/js/bootstrap.min.js"></script>

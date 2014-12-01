@@ -1,7 +1,9 @@
 import json
+import requests
 from datetime import datetime, timedelta
-from tornado import gen
-from tornado.httpclient import AsyncHTTPClient
+
+from ..app import app
+
 
 class Tower(object):
     _posmon_url = None
@@ -28,19 +30,16 @@ class Tower(object):
         return self._json['location']['orbit_name']
 
     @classmethod
-    def configure(cls, url):
-        cls._posmon_url = url
-
-    @classmethod
-    @gen.coroutine
     def fetch_all(cls):
         result = {}
-        response = yield AsyncHTTPClient().fetch(cls._posmon_url)
-        for line in response.buffer:
+        response = requests.get(app.config['POSMON_URL'])
+        for line in response.iter_lines():
+            if not line or not line.startswith('{'):
+                continue
             obj = json.loads(line)
             corp = obj['corporation']
             start = datetime.strptime(obj['cache_ts'], '%Y-%m-%d %H:%M:%S')
             for tower_json in obj['towers']:
                 tower = Tower(tower_json, start, corp)
                 result[tower.orbit_id] = tower
-        raise gen.Return(result)
+        return result

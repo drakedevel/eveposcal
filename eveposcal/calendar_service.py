@@ -1,63 +1,68 @@
+import gevent
 import logging
-import toro
+import time
 from collections import defaultdict
 from datetime import datetime, timedelta
-from tornado import gen
-from tornado.httpclient import HTTPError
-from tornado.ioloop import PeriodicCallback
+from gevent.lock import Semaphore
 
-from .google_calendar import GoogleCalendarAPI
-from .model.db import CalendarEvent, EnabledTowers, Session, Settings, Token, session_ctx
+from googleapiclient import discovery
+from googleapiclient.errors import HttpError
+
+from .app import app, db
+from .model.db import CalendarEvent, EnabledTowers, Settings, Token
 from .model.posmon import Tower
 
 logger = logging.getLogger(__name__)
+
 
 class RunAbortedException(Exception):
     def __init__(self, code):
         self.code = code
 
+
 class CalendarServiceRun(object):
-    def __init__(self, app, char_id):
-        self.app = app
+    def __init__(self, char_id):
         self.cal_api = None
         self.char_id = char_id
-        self.session = Session()
 
-    @gen.coroutine
+    @staticmethod
+    def _format_date(dt):
+        return {'dateTime': dt.isoformat() + 'Z', 'timeZone': 'UTC'}
+
+    @staticmethod
+    def _parse_date(dt):
+        return datetime.strptime(dt['dateTime'], '%Y-%m-%dT%H:%M:%SZ')
+
     def _get_calendar(self):
-        cal_id = Settings.get(self.session, self.char_id, Settings.CALENDAR)
+        cal_id = Settings.get(self.char_id, Settings.CALENDAR)
         try:
-            yield self.cal_api.get_calendar(cal_id)
-        except HTTPError as e:
+            self.cal_api.calendars().get(calendarId=cal_id).execute()
+        except HttpError as e:
             logger.debug("Failed to fetch calendar for char_id=%s", self.char_id, exc_info=True)
-            if e.code == 401:
+            if e.resp.status == 401:
                 raise RunAbortedException('auth')
-            elif e.code == 404:
+            elif e.resp.status == 404:
                 raise RunAbortedException('calendar_missing')
             else:
                 raise RunAbortedException('api_failure')
-        raise gen.Return(cal_id)
-        # XXX
-        #if not cal_id:
-        #    logger.debug("Making calendar for char_id=%s", self.char_id)
-        #    cal_id = yield self._make_calendar(self.session, self.char_id, self.cal_api)
+        return cal_id
 
-    @gen.coroutine
     def _get_events(self, cal_id):
         existing = {}
-        for evt in CalendarEvent.get_for_char(self.session, self.char_id):
+        for evt in CalendarEvent.get_for_char(self.char_id):
             try:
-                cal_event = yield self.cal_api.get_event(cal_id, evt.event_id)
+                cal_event = self.cal_api.events().get(calendarId=cal_id,
+                                                      eventId=evt.event_id).execute()
                 if cal_event['status'] != 'cancelled':
                     existing[evt.orbit_id] = cal_event
-            except HTTPError as e:
+            except HttpError as e:
                 logger.debug('Failed to fetch calendar event for char_id=%d orbit_id=%d',
                              self.char_id, evt.orbit_id)
-                if e.code == 401:
+                if e.resp.status == 401:
                     raise RunAbortedException('auth')
-                elif e.code != 404:
+                elif e.resp.status != 404:
                     raise RunAbortedException('api_failure')
-        raise gen.Return(existing)
+        return existing
 
     def _make_event_args(self, towers):
         args = {}
@@ -67,79 +72,77 @@ class CalendarServiceRun(object):
             expires = (tower.get_fuel_expiration() - offset).replace(minute=0, second=0)
             args[orbit_id] = {
                 'summary': 'Refuel %s' % (tower.name,),
-                'start': expires,
-                'end': expires,
-                'extra': {'location': tower.orbit_name},
+                'start': self._format_date(expires),
+                'end': self._format_date(expires),
+                'location': tower.orbit_name,
             }
         return args
 
-    @gen.coroutine
     def _do_add(self, cal_id, orbit_id, event_args):
         logger.info("Creating event for char_id=%s orbit_id=%s args=%s",
                     self.char_id, orbit_id, event_args)
         try:
-            response = yield self.cal_api.add_event(cal_id, **event_args)
-        except HTTPError as e:
-            if e.code == 401:
+            response = self.cal_api.events().insert(calendarId=cal_id,
+                                                    body=event_args).execute()
+        except HttpError as e:
+            if e.resp.status == 401:
                 raise RunAbortedException('auth')
             else:
                 raise RunAbortedException('api_failure')
         event = CalendarEvent(char_id=self.char_id,
                               orbit_id=orbit_id,
                               event_id=response['id'])
-        self.session.merge(event)
+        db.session.merge(event)
 
-    @gen.coroutine
     def _do_update(self, cal_id, orbit_id, old_event, event_args):
-        start = event_args['start']
-        existing_start = datetime.strptime(old_event['start']['dateTime'], '%Y-%m-%dT%H:%M:%SZ')
+        start = self._parse_date(event_args['start'])
+        existing_start = self._parse_date(old_event['start'])
         if abs(existing_start - start) <= timedelta(hours=1):
             return
         logger.info("Updating event for char_id=%s orbit_id=%s args=%s",
                     self.char_id, orbit_id, event_args)
         try:
-            yield self.cal_api.update_event(cal_id,
-                                            old_event['id'],
-                                            old_event['sequence'] + 1,
-                                            **event_args)
-        except HTTPError as e:
-            if e.code == 401:
+            body = {'sequence': old_event['sequence'] + 1}
+            body.update(event_args)
+            self.cal_api.events().update(calendarId=cal_id,
+                                         eventId=old_event['id'],
+                                         body=body).execute()
+        except HttpError as e:
+            if e.resp.status == 401:
                 raise RunAbortedException('auth')
             else:
                 raise RunAbortedException('api_failure')
 
-    @gen.coroutine
     def _do_delete(self, cal_id, orbit_id, old_event):
         logger.info("Deleting event for char_id=%s orbit_id=%s",
                     self.char_id, orbit_id)
         try:
-            yield self.cal_api.delete_event(cal_id, old_event['id'])
-        except HTTPError as e:
-            if e.code == 401:
+            self.cal_api.events().delete(calendarId=cal_id, eventId=old_event['id']).execute()
+        except HttpError as e:
+            if e.resp.status == 401:
                 raise RunAbortedException('auth')
             else:
                 raise RunAbortedException('api_failure')
-        CalendarEvent.delete(self.session, self.char_id, orbit_id)
+        CalendarEvent.delete(self.char_id, orbit_id)
 
-    @gen.coroutine
     def _run(self):
         # Set up GCal API
-        token = Token.get_google_oauth(self.app, self.session, self.char_id)
+        token = Token.get_google_oauth(self.char_id)
         if token is None:
             raise Exception("No Google Calendar API token")
-        self.cal_api = GoogleCalendarAPI(token)
+        self.cal_api = discovery.build('calendar', 'v3', credentials=token)
 
         # Fetch enabled towers from posmon
         # FIXME: Do this up front / batched
-        enabled = set(e.orbit_id for e in EnabledTowers.get_for_char(self.session, self.char_id))
-        towers = yield Tower.fetch_all()
+        enabled = set(e.orbit_id for e in EnabledTowers.get_for_char(self.char_id))
+        towers = Tower.fetch_all()
         for orbit_id in towers.keys():
             if orbit_id not in enabled:
                 del towers[orbit_id]
 
         # Fetch existing calendar/events
-        cal_id = yield self._get_calendar()
-        existing = yield self._get_events(cal_id)
+        cal_id = self._get_calendar()
+        existing = self._get_events(cal_id)
 
         # Compute sets to add/update/delete
         to_add = set(towers.iterkeys()) - set(existing.iterkeys())
@@ -151,17 +154,16 @@ class CalendarServiceRun(object):
 
         # Perform calendar changes
         for orbit_id in to_add:
-            yield self._do_add(cal_id, orbit_id, event_args[orbit_id])
+            self._do_add(cal_id, orbit_id, event_args[orbit_id])
         for orbit_id in to_update:
-            yield self._do_update(cal_id, orbit_id, existing[orbit_id], event_args[orbit_id])
+            self._do_update(cal_id, orbit_id, existing[orbit_id], event_args[orbit_id])
         for orbit_id in to_delete:
-            yield self._do_delete(cal_id, orbit_id, existing[orbit_id])
+            self._do_delete(cal_id, orbit_id, existing[orbit_id])
 
-    @gen.coroutine
     def run(self):
         commit = True
         try:
-            yield self._run()
+            self._run()
             logger.info('Run for char_id=%d successful', self.char_id)
         except RunAbortedException as e:
             logger.warn('Run for char_id=%d aborted with %s', self.char_id, e.code)
@@ -171,46 +173,64 @@ class CalendarServiceRun(object):
             raise
         finally:
             if commit:
-                self.session.commit()
-            else:
-                self.session.rollback()
+                db.session.commit()
 
-class CalendarService(PeriodicCallback):
+
+class CalendarService(object):
     PERIOD_MS = 60 * 60 * 1000
 
-    def __init__(self, app):
-        super(CalendarService, self).__init__(self.run_for_all, self.PERIOD_MS)
-        self.app = app
-        self._locks = defaultdict(toro.Lock)
+    def __init__(self):
+        self._greenlet = None
+        self._locks = defaultdict(Semaphore)
 
-    @gen.coroutine
+    def _greenlet_main(self):
+        next_t = time.time() + self.PERIOD_MS
+        while True:
+            if time.time() < next_t:
+                gevent.sleep(next_t - time.time())
+                continue
+            else:
+                next_t = time.time() + self.PERIOD_MS
+
+            self.run_for_all()
+
     def make_calendar(self, char_id, token):
-        cal_api = GoogleCalendarAPI(token)
-        with (yield self._locks[char_id].acquire()):
-            response = yield cal_api.add_calendar('EVE POS events')
-            cal_id = response['id']
-            with session_ctx() as session:
-                Settings.set(session, char_id, Settings.CALENDAR, cal_id)
-            raise gen.Return(cal_id)
+        cal_api = discovery.build('calendar', 'v3', credentials=token)
+        response = cal_api.calendars().insert(body={'summary': 'EVE POS events'}).execute()
+        cal_id = response['id']
+        Settings.set(char_id, Settings.CALENDAR, cal_id)
+        return cal_id
 
-    @gen.coroutine
     def run_for_all(self):
-        with session_ctx() as session:
+        with app.app_context():
             # Get all enabled towers (to figure out what keys we need)
-            enabled_towers = session.query(EnabledTowers).all()
+            enabled_towers = EnabledTowers.query.all()
             char_ids = list(set(e.char_id for e in enabled_towers))
 
             logger.info("Starting update run")
-            results = [self.run_for_char(char_id) for char_id in char_ids]
-            for char_id, res in zip(char_ids, results):
-                try:
-                    yield res
+            greenlets = [self.run_for_char(char_id) for char_id in char_ids]
+            for char_id, greenlet in zip(char_ids, greenlets):
+                greenlet.join()
+                if greenlet.successful():
                     logger.debug("Update run succeeded for char id %s", char_id)
-                except Exception:
-                    logger.warn("Update run failed for char id %s", char_id, exc_info=True)
+                else:
+                    logger.warn("Update run failed for char id %s: %s", char_id,
+                                greenlet.exception)
             logger.info("Update run done")
 
-    @gen.coroutine
     def run_for_char(self, char_id):
-        with (yield self._locks[char_id].acquire()):
-            yield CalendarServiceRun(self.app, char_id).run()
+        def _run():
+            with self._locks[char_id]:
+                CalendarServiceRun(char_id).run()
+        with app.app_context():
+            return gevent.spawn(_run)
+
+    def start(self):
+        if self._greenlet:
+            return
+        self._greenlet = gevent.spawn(self._greenlet_main)
+
+    def stop(self):
+        if self._greenlet:
+            self._greenlet.kill()
+            self._greenlet = None

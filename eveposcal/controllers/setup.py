@@ -1,91 +1,83 @@
 import logging
-from tornado import gen, web
-from tornado.httpclient import HTTPError
+from flask import g, render_template, redirect, request, session, url_for
 
-from .base import RequestHandler
-from ..google_calendar import GoogleCalendarAPI, GooglePlusAPI
+from googleapiclient import discovery
+from googleapiclient.errors import HttpError
+
+from .base import auth_required, check_referrer
+from ..app import app, db
 from ..model.db import EnabledTowers, Settings, Token
-from ..posmon_model import PosmonClient
+from ..model.posmon import Tower
 
 
 logger = logging.getLogger(__name__)
 
 
-class ConfigSetPosHandler(RequestHandler):
-    @gen.coroutine
-    @web.authenticated
-    def post(self):
-        self.session.query(EnabledTowers).filter(EnabledTowers.char_id == self.current_user).delete()
-        for arg, value in self.request.body_arguments.iteritems():
-            if arg.isdigit():
-                self.session.add(EnabledTowers(char_id=self.current_user, orbit_id=int(arg)))
-        self.application.cal_service.run_for_char(self.current_user)
-        self.redirect(self.reverse_url('home'))
+@app.route('/config/set_poses', methods=('POST',))
+@auth_required
+def config_set_poses():
+    EnabledTowers.query.filter(EnabledTowers.char_id == g.char_id).delete()
+    for arg, value in request.form.iteritems():
+        if arg.isdigit():
+            enable = EnabledTowers(char_id=g.char_id, orbit_id=int(arg))
+            db.session.add(enable)
+    db.session.commit()
+
+    # Run a background update pass
+    app.cal_service.run_for_char(g.char_id)
+
+    # TODO(adrake): Flash a message
+    return redirect(url_for('home'))
 
 
-class HomeHandler(RequestHandler):
-    @gen.coroutine
-    @web.authenticated
-    def get(self):
-        # Check for valid Google token
-        token = Token.get_google_oauth(self.application,
-                                       self.session,
-                                       self.current_user)
-        person = None
-        if token:
-            api = GooglePlusAPI(token)
-            try:
-                person = yield api.get_person()
-            except HTTPError:
-                Token.clear_google_oauth(self.session, self.current_user)
+@app.route('/')
+@auth_required
+def home():
+    # Check for valid Google token
+    token = Token.get_google_oauth(g.char_id)
+    person = None
+    if token:
+        api = discovery.build('plus', 'v1', credentials=token)
+        person = api.people().get(userId='me').execute()
 
-        # Check for selected POSes
-        enabled = set(e.orbit_id for e in
-                      self.session.query(EnabledTowers)
-                          .filter(EnabledTowers.char_id == self.current_user).all())
+    # Check for selected POSes
+    enabled = set(e.orbit_id for e in EnabledTowers.get_for_char(g.char_id))
+    towers = Tower.fetch_all().values()
+    towers.sort(key=lambda t: t.orbit_name)
 
-        towers = yield PosmonClient(self.application).get_towers()
+    db.session.commit()
 
-        self.render('home.html',
-                    char_name=self.cookie['char_name'],
-                    enabled=enabled,
-                    person=person,
-                    towers=towers)
+    return render_template('home.html',
+                           char_name=session['char_name'],
+                           enabled=enabled,
+                           person=person,
+                           towers=towers)
 
 
-class ResetHandler(RequestHandler):
-    @gen.coroutine
-    @web.authenticated
-    def get(self):
-        self.check_referer()
+@app.route('/reset')
+@auth_required
+def reset():
+    check_referrer()
 
-        # Get the user's Google API token
-        token = Token.get_google_oauth(self.application, self.session, self.current_user)
-        if token is None:
-            self.finish("This only works after you've linked your Google Calendar API token")
-        cal_api = GoogleCalendarAPI(token)
+    # Get the user's Google API token
+    token = Token.get_google_oauth(g.char_id)
+    if token is None:
+        return "This only works after you've linked your Google Calendar API token"
+    cal_api = discovery.build('calendar', 'v3', credentials=token)
 
-        # Delete calendar linked to account
-        cal_id = Settings.get(self.session, self.current_user, Settings.CALENDAR)
-        if cal_id:
-            try:
-                yield cal_api.delete_calendar(cal_id)
-            except HTTPError:
-                logger.debug("Failed to delete calendar", exc_info=True)
+    # Delete calendar linked to account
+    cal_id = Settings.get(g.char_id, Settings.CALENDAR)
+    if cal_id:
+        try:
+            cal_api.calendars().delete(calendarId=cal_id).execute()
+        except HttpError:
+            logger.debug("Failed to delete calendar", exc_info=True)
 
-        # Create a new calendar
-        yield _make_calendar(self.session, self.current_user, cal_api)
+    # Create a new calendar
+    app.cal_service.make_calendar(g.char_id, token)
+    db.session.commit()
 
-        # Run synchronous update pass
-        yield self.application.cal_service.run_for_char(self.current_user)
+    # Run synchronous update pass
+    app.cal_service.run_for_char(g.char_id).join()
 
-        self.redirect(self.reverse_url('home'))
-
-
-@gen.coroutine
-def _make_calendar(session, char_id, cal_api):
-    response = yield cal_api.add_calendar('EVE POS events')
-    cal_id = response['id']
-    Settings.set(session, char_id, Settings.CALENDAR, cal_id)
-    session.commit()
-    raise gen.Return(cal_id)
+    return redirect(url_for('home'))

@@ -1,53 +1,39 @@
-import json
+import gevent.monkey
+gevent.monkey.patch_socket()
+gevent.monkey.patch_ssl()
+
 import logging
-import os
-import sys
-from binascii import unhexlify
-from ecdsa.keys import SigningKey, VerifyingKey
-from ecdsa.curves import NIST256p
-from hashlib import sha256
-from sqlalchemy import create_engine
-from tornado import web
-from tornado.ioloop import IOLoop
+from gevent.pywsgi import WSGIServer
 
+from . import default_config
+from .app import app, db
 from .calendar_service import CalendarService
-from .model.db import Base, Session
-from .model.posmon import Tower
-from .routing import ROUTES
+from .controllers import auth, setup
+from .model import db as db_model
 
-def main():
+# "Use" these module objects to make flake8 quiet down
+auth, db_model, setup
+
+def setup_app():
     logging.basicConfig(level=logging.DEBUG,
                         format="[%(asctime)s %(name)s %(levelname)s] %(message)s")
 
-    # Read config
-    with open(sys.argv[1]) as config_f:
-        config = json.load(config_f)
+    # Read configs and set up the app
+    app.config.from_object(default_config)
+    app.config.from_envvar('POSCAL_CONFIG')
 
-    # Convert config keys to actual keys
-    config['brave_auth']['public'] = VerifyingKey.from_string(
-        unhexlify(config['brave_auth']['public']), curve=NIST256p, hashfunc=sha256)
-    config['brave_auth']['private'] = SigningKey.from_string(
-        unhexlify(config['brave_auth']['private']), curve=NIST256p, hashfunc=sha256)
-
-    # Configure web routes
-    app = web.Application(ROUTES, debug=config['debug'])
-    app.settings.update(config)
-    app.settings['template_path'] = os.path.join(os.path.dirname(__file__), '..', 'templates')
-    app.settings['xsrf_cookies'] = True
-    app.listen(8000, address='127.0.0.1', xheaders=True)
-
-    # Configure database engine
-    engine = create_engine(app.settings['database'], pool_recycle=3600)
-    Session.configure(bind=engine)
-    Base.metadata.create_all(engine)
-    Tower.configure(app.settings['posmon_url'])
-
-    # Start service coroutines
-    app.cal_service = CalendarService(app)
+    # Start service threads
+    app.cal_service = CalendarService()
     app.cal_service.start()
 
-    # Start IO loop
-    IOLoop.instance().start()
+    # Set up database schema
+    db.create_all()
+    db.session.commit()
+
+def main():
+    # Serve requests
+    setup_app()
+    WSGIServer(('127.0.0.1', 8000), app).serve_forever()
 
 if __name__ == '__main__':
     main()
