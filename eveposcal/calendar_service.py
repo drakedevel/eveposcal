@@ -177,20 +177,20 @@ class CalendarServiceRun(object):
 
 
 class CalendarService(object):
-    PERIOD_MS = 60 * 60 * 1000
+    PERIOD_S = 60 * 60
 
     def __init__(self):
         self._greenlet = None
         self._locks = defaultdict(Semaphore)
 
     def _greenlet_main(self):
-        next_t = time.time() + self.PERIOD_MS
+        next_t = time.time() + self.PERIOD_S
         while True:
             if time.time() < next_t:
                 gevent.sleep(next_t - time.time())
                 continue
             else:
-                next_t = time.time() + self.PERIOD_MS
+                next_t = time.time() + self.PERIOD_S
 
             self.run_for_all()
 
