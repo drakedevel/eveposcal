@@ -8,11 +8,11 @@ from gevent.pywsgi import WSGIServer
 from . import default_config
 from .app import app, db
 from .calendar_service import CalendarService
-from .controllers import auth, setup
+from .controllers import admin, auth, setup
 from .model import db as db_model
 
 # "Use" these module objects to make flake8 quiet down
-auth, db_model, setup
+admin, auth, db_model, setup
 
 def setup_app():
     logging.basicConfig(level=logging.DEBUG,

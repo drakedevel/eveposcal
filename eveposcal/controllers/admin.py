@@ -4,6 +4,6 @@ from ..app import app
 
 @app.route('/admin/force')
 @auth_required
-def get(self):
+def get():
     app.cal_service.run_for_all()
     return 'OK'
